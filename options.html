@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Prompt Spur settings</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; min-width: 320px; font: 16px/1.45 system-ui, sans-serif; background: #11091d; color: #f8f6ff; }
+    main { max-width: 560px; margin: 56px auto; padding: 0 24px; }
+    header { display: flex; align-items: center; gap: 16px; margin-bottom: 32px; }
+    header img { width: 56px; height: 56px; }
+    h1 { margin: 0; font-size: 30px; } p { color: #cbbfdc; }
+    label { display: block; margin: 24px 0 8px; font-weight: 700; }
+    input { box-sizing: border-box; width: 100%; padding: 12px 14px; border: 1px solid #6d5a80; border-radius: 10px; background: #21142f; color: #fff; font: inherit; }
+    .hint { margin-top: 8px; font-size: 14px; }
+    button { margin-top: 22px; padding: 11px 18px; border: 0; border-radius: 999px; background: #a7ff28; color: #130b1e; font: 700 15px system-ui, sans-serif; cursor: pointer; }
+    #status { margin-left: 10px; color: #a7ff28; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <main>
+    <header><img src="icons/icon-128.png" alt=""><div><h1>Prompt Spur</h1><p>Give ChatGPT a nudge.</p></div></header>
+    <label for="message">Text sent by the button</label>
+    <input id="message" maxlength="2000" autocomplete="off" spellcheck="false" placeholder="turn">
+    <p class="hint">Default: <code>turn</code>. The button is available when the ChatGPT composer is empty.</p>
+    <button id="save" type="button">Save</button><span id="status" aria-live="polite"></span>
+  </main>
+  <script src="options.js"></script>
+</body>
+</html>

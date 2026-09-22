@@ -1,0 +1,4 @@
+{
+  "extensionName": { "message": "Prompt Spur" },
+  "extensionDescription": { "message": "Кнопка-пинок рядом с отправкой в ChatGPT. По умолчанию отправляет TURN; текст меняется в настройках." }
+}

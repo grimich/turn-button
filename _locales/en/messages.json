@@ -1,0 +1,4 @@
+{
+  "extensionName": { "message": "Prompt Spur" },
+  "extensionDescription": { "message": "A kick-button beside Send on ChatGPT. Sends TURN by default; customize it in settings." }
+}
