@@ -18,6 +18,9 @@
     const button = document.getElementById(BUTTON_ID);
     if (button) updateButton(button);
   });
+  // Mount immediately with the safe default. Storage only changes the label later,
+  // so it cannot make this button arrive seconds after its neighboring controls.
+  scheduleSync();
 
   function isVisible(element) {
     if (!element) return false;
@@ -51,7 +54,7 @@
     const slot = send?.closest('.inline-flex') || send;
     actions = document.createElement('span');
     actions.id = ACTIONS_ID;
-    actions.style.cssText = 'display:inline-flex;align-items:center;gap:6px;flex:none';
+    actions.style.cssText = 'display:inline-flex;align-items:center;gap:6px;flex:none;transition:none!important';
     if (slot) slot.before(actions);
     else {
       const row = actionRow(form);
@@ -101,7 +104,7 @@
       'height:36px', 'display:inline-flex', 'align-items:center', 'gap:6px',
       'border:1px solid #6a5080', 'border-radius:999px', 'padding:0 10px 0 7px',
       'background:#241431', 'color:#fff', 'font:600 13px/1 system-ui,sans-serif',
-      'cursor:pointer'
+      'cursor:pointer', 'order:10', 'transition:none!important'
     ].join(';');
     const svg = button.querySelector('svg');
     svg.style.cssText = 'width:23px;height:23px;display:block';
