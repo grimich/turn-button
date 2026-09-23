@@ -123,9 +123,11 @@
     if (!actions) return;
     button.style.order = '10';
     if (button.parentElement !== actions) actions.append(button);
-    button.disabled = !isEmpty(target);
-    button.style.opacity = button.disabled ? '.45' : '1';
-    button.style.cursor = button.disabled ? 'not-allowed' : 'pointer';
+    // ChatGPT can replace the composer after a generation without emitting an
+    // input event. Keeping TURN enabled avoids leaving it stuck disabled.
+    button.disabled = false;
+    button.style.opacity = '1';
+    button.style.cursor = 'pointer';
   }
 
   function scheduleSync() { clearTimeout(syncTimer); syncTimer = setTimeout(sync, 250); }
