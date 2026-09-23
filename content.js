@@ -2,6 +2,7 @@
   'use strict';
 
   const BUTTON_ID = 'prompt-spur-button';
+  const ACTIONS_ID = 'chatgpt-local-actions';
   const DEFAULT_MESSAGE = 'turn';
   let message = DEFAULT_MESSAGE;
   let syncTimer = 0;
@@ -42,6 +43,24 @@
       form.querySelector('[data-composer-transition-slot="trailing"]');
   }
 
+  function actionContainer(form) {
+    let actions = document.getElementById(ACTIONS_ID);
+    if (actions?.closest('form') === form) return actions;
+
+    const send = sendButton(form);
+    const slot = send?.closest('.inline-flex') || send;
+    actions = document.createElement('span');
+    actions.id = ACTIONS_ID;
+    actions.style.cssText = 'display:inline-flex;align-items:center;gap:6px;flex:none';
+    if (slot) slot.before(actions);
+    else {
+      const row = actionRow(form);
+      if (!row) return null;
+      row.prepend(actions);
+    }
+    return actions;
+  }
+
   function isEmpty(target) { return !target.innerText.trim(); }
 
   function insertText(target, text) {
@@ -66,7 +85,8 @@
   }
 
   function updateButton(button) {
-    const label = message.length > 22 ? `${message.slice(0, 21)}…` : message;
+    const displayMessage = message === DEFAULT_MESSAGE ? 'TURN' : message;
+    const label = displayMessage.length > 22 ? `${displayMessage.slice(0, 21)}…` : displayMessage;
     button.title = `Send: ${message}`;
     button.setAttribute('aria-label', `Send: ${message}`);
     button.querySelector('.prompt-spur-label').textContent = label;
@@ -96,13 +116,10 @@
     const form = target?.closest('form');
     if (!target || !form) return;
     const button = document.getElementById(BUTTON_ID) || createButton();
-    const send = sendButton(form);
-    const sendSlot = send?.closest('.inline-flex') || send;
-    if (sendSlot && button.nextElementSibling !== sendSlot) sendSlot.before(button);
-    else if (!sendSlot) {
-      const row = actionRow(form);
-      if (row && button.parentElement !== row) row.prepend(button);
-    }
+    const actions = actionContainer(form);
+    if (!actions) return;
+    button.style.order = '10';
+    if (button.parentElement !== actions) actions.append(button);
     button.disabled = !isEmpty(target);
     button.style.opacity = button.disabled ? '.45' : '1';
     button.style.cursor = button.disabled ? 'not-allowed' : 'pointer';
@@ -112,8 +129,7 @@
   function composerChanged() {
     const target = editor(); const form = target?.closest('form'); const button = document.getElementById(BUTTON_ID);
     if (!target || !form || !button || button.closest('form') !== form) return true;
-    const send = sendButton(form); const sendSlot = send?.closest('.inline-flex') || send;
-    return Boolean(sendSlot && button.nextElementSibling !== sendSlot);
+    return button.parentElement !== document.getElementById(ACTIONS_ID);
   }
 
   document.addEventListener('input', event => { if (event.target === editor()) scheduleSync(); }, true);
