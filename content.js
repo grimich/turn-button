@@ -72,18 +72,19 @@
     let actions = document.getElementById(ACTIONS_ID);
     if (actions?.closest('form') === form) return actions;
 
+    const voice = [...form.querySelectorAll('button')].find(button => /start voice/i.test(button.getAttribute('aria-label') || ''));
+    const voiceSlot = voice?.parentElement;
     const send = sendButton(form);
-    const slot = send?.closest('.inline-flex') || send;
+    const sendSlot = send?.closest('.inline-flex') || send;
     actions = document.createElement('span');
     actions.id = ACTIONS_ID;
     actions.style.cssText = 'display:inline-flex;align-items:center;gap:6px;flex:none;transition:none!important';
-    if (slot) slot.before(actions);
+    // Voice becomes Send in place. Anchoring here once keeps TURN stationary.
+    if (voiceSlot) voiceSlot.before(actions);
+    else if (sendSlot) sendSlot.before(actions);
     else {
       const row = actionRow(form);
-      const voice = [...form.querySelectorAll('button')].find(button => /start voice/i.test(button.getAttribute('aria-label') || ''));
-      const voiceSlot = voice?.parentElement;
       if (row) row.prepend(actions);
-      else if (voiceSlot) voiceSlot.before(actions);
       else return null;
     }
     return actions;
