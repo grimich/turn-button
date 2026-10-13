@@ -7,11 +7,12 @@
   const DEFAULT_MESSAGE = 'turn';
   let message = DEFAULT_MESSAGE;
   let syncTimer = 0;
-  let mountAttempts = 0;
+  let mountDeadline = Date.now() + 120000;
+  let composerObserver = null;
+  let observedRoot = null;
   let bridgeNonce = crypto.randomUUID();
   let bridgeRequestId = 0;
   const bridgeRequests = new Map();
-
   chrome.storage.local.get({ message: DEFAULT_MESSAGE }, (stored) => {
     if (typeof stored.message === 'string' && stored.message.trim()) message = stored.message;
     scheduleSync();
@@ -31,9 +32,13 @@
     if (event.source !== window || event.origin !== location.origin) return;
     const data = event.data;
     if (!data || data.channel !== CHANNEL || data.nonce !== bridgeNonce) return;
-    if (data.type !== 'SEND_RESULT') return;
     const pending = bridgeRequests.get(data.payload?.requestId);
     if (!pending) return;
+    if (data.type === 'SEND_ACCEPTED') {
+      pending.accept();
+      return;
+    }
+    if (data.type !== 'SEND_RESULT') return;
     bridgeRequests.delete(data.payload.requestId);
     pending.resolve(data.payload);
   });
@@ -75,8 +80,11 @@
     if (slot) slot.before(actions);
     else {
       const row = actionRow(form);
-      if (!row) return null;
-      row.prepend(actions);
+      const voice = [...form.querySelectorAll('button')].find(button => /start voice/i.test(button.getAttribute('aria-label') || ''));
+      const voiceSlot = voice?.parentElement;
+      if (row) row.prepend(actions);
+      else if (voiceSlot) voiceSlot.before(actions);
+      else return null;
     }
     return actions;
   }
@@ -97,6 +105,7 @@
         resolve({ ok: false, fallback: true, reason: 'Bridge unavailable' });
       }, 350);
       bridgeRequests.set(requestId, {
+        accept: () => clearTimeout(timeout),
         resolve: result => { clearTimeout(timeout); resolve(result); }
       });
       window.postMessage({ channel: CHANNEL, nonce: bridgeNonce, type: 'SEND', payload: { requestId, text } }, location.origin);
@@ -109,16 +118,17 @@
     if (!target || !form || !isEmpty(target)) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     insertText(target, message);
-    const trySend = attempts => {
+    const deadline = performance.now() + 2000;
+    const trySend = () => {
       const send = sendButton(form);
       if (send && !send.disabled) {
         send.click();
         if (previousFocus && previousFocus.isConnected) setTimeout(() => previousFocus.focus({ preventScroll: true }), 0);
-      } else if (attempts > 0) {
-        requestAnimationFrame(() => trySend(attempts - 1));
+        return;
       }
+      if (performance.now() < deadline) requestAnimationFrame(trySend);
     };
-    requestAnimationFrame(() => trySend(3));
+    requestAnimationFrame(trySend);
   }
 
   async function sendMessage() {
@@ -129,7 +139,7 @@
     button.style.opacity = '.7';
     try {
       const result = await bridgeSend(message);
-      if (!result.ok || result.fallback) sendViaComposer();
+      if (result.fallback) sendViaComposer();
     } finally {
       button.dataset.busy = '0';
       button.disabled = false;
@@ -172,13 +182,13 @@
     const target = editor();
     const form = target?.closest('form');
     if (!target || !form) {
-      if (mountAttempts++ < 30) setTimeout(sync, 500);
+      if (Date.now() < mountDeadline) setTimeout(scheduleSync, 1000);
       return;
     }
-    mountAttempts = 0;
+    mountDeadline = Date.now() + 120000;
     const button = document.getElementById(BUTTON_ID) || createButton();
     const actions = actionContainer(form);
-    if (!actions) return;
+    if (!actions) { return; }
     button.style.order = '10';
     if (button.parentElement !== actions) actions.append(button);
     // ChatGPT can replace the composer after a generation without emitting an
@@ -186,16 +196,24 @@
     button.disabled = false;
     button.style.opacity = '1';
     button.style.cursor = 'pointer';
+    watchComposer(form);
+  }
+
+  function watchComposer(form) {
+    const root = form.parentElement || form;
+    if (root === observedRoot) return;
+    composerObserver?.disconnect();
+    observedRoot = root;
+    composerObserver = new MutationObserver(() => {
+      const current = editor()?.closest('form');
+      const button = document.getElementById(BUTTON_ID);
+      if (current !== form || !button || button.closest('form') !== current) scheduleSync();
+    });
+    composerObserver.observe(root, { childList: true, subtree: true });
   }
 
   function scheduleSync() { clearTimeout(syncTimer); syncTimer = setTimeout(sync, 250); }
-  function composerChanged() {
-    const target = editor(); const form = target?.closest('form'); const button = document.getElementById(BUTTON_ID);
-    if (!target || !form || !button || button.closest('form') !== form) return true;
-    return button.parentElement !== document.getElementById(ACTIONS_ID);
-  }
 
   document.addEventListener('input', event => { if (event.target === editor()) scheduleSync(); }, true);
-  new MutationObserver(() => { if (composerChanged()) scheduleSync(); }).observe(document.documentElement, { childList: true, subtree: true });
   scheduleSync();
 })();

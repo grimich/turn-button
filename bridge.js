@@ -2,6 +2,8 @@
   'use strict';
 
   const CHANNEL = 'prompt-spur-bridge-v1';
+  // This switch is compiled only for the isolated trace conversation and removed after proof.
+  const directTestConversation = '/c/6ace07fa-4e04-83ed-9e7e-026e67620b60';
   window.__promptSpurBridge = { version: 1 };
   const originalFetch = window.fetch.bind(window);
   const profile = {
@@ -19,8 +21,26 @@
     conversationTemplate: null,
     headers: null,
     pendingNativeResponse: null,
-    responseParentCaptured: false
+    responseParentCaptured: false,
+    lastResult: null
   };
+
+  Object.assign(window.__promptSpurBridge, {
+    getStatus: () => ({
+      calibrated: profile.calibrated,
+      directReady: profile.directReady,
+      busy: profile.busy,
+      captured: {
+        prepare: Boolean(profile.prepareTemplate),
+        conversation: Boolean(profile.conversationTemplate),
+        headers: Boolean(profile.headers),
+        conversationId: Boolean(profile.conversationId),
+        parentMessageId: Boolean(profile.parentMessageId),
+        responseParent: profile.responseParentCaptured
+      },
+      lastResult: profile.lastResult
+    })
+  });
 
   const clone = value => JSON.parse(JSON.stringify(value));
   const relevantPath = path => /\/backend-api\/(?:f\/conversation(?:\/prepare)?|sentinel\/chat-requirements\/(?:prepare|finalize)|conversation\/init)(?:[/?]|$)/.test(path);
@@ -67,6 +87,11 @@
     }
   }
 
+  function refreshCalibration() {
+    profile.calibrated = Boolean(profile.prepareTemplate && profile.conversationTemplate && profile.headers && profile.responseParentCaptured && profile.parentMessageId);
+    profile.directReady = profile.calibrated && location.pathname === directTestConversation;
+  }
+
   function findAssistantMessageId(value, seen = new WeakSet(), depth = 0) {
     if (!value || typeof value !== 'object' || depth > 10 || seen.has(value)) return null;
     seen.add(value);
@@ -106,9 +131,7 @@
         }
       }
       if (source === 'native' && profile.parentMessageId) {
-        profile.calibrated = Boolean(profile.prepareTemplate && profile.conversationTemplate && profile.headers && profile.responseParentCaptured);
-        // Direct rendering is deliberately gated until the live-response path is verified.
-        profile.directReady = false;
+        refreshCalibration();
         emit('STATUS', { calibrated: profile.calibrated, directReady: profile.directReady });
       }
     } finally {
@@ -149,6 +172,28 @@
     };
   }
 
+  async function revalidateConversation() {
+    const router = window.__reactRouterDataRouter;
+    if (!router || typeof router.revalidate !== 'function') return false;
+    const complete = new Promise(resolve => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        unsubscribe?.();
+        resolve(true);
+      };
+      const unsubscribe = typeof router.subscribe === 'function'
+        ? router.subscribe(state => { if (state.revalidation === 'idle' && state.navigation?.state === 'idle') finish(); })
+        : null;
+      setTimeout(() => {
+        if (!settled) { settled = true; unsubscribe?.(); resolve(false); }
+      }, 6000);
+    });
+    router.revalidate();
+    return complete;
+  }
+
   async function directSend(text) {
     if (!profile.directReady) throw new Error('Direct mode is not calibrated');
     if (profile.busy) throw new Error('A request is already active');
@@ -186,7 +231,8 @@
       });
       if (!response.ok) throw new Error(`Conversation failed: ${response.status}`);
       await consumeResponse(response, 'direct');
-      return { mode: 'direct' };
+      const revalidated = await revalidateConversation();
+      return { mode: 'direct', revalidated };
     } finally {
       profile.busy = false;
     }
@@ -203,8 +249,22 @@
     }
     if (data.nonce !== profile.nonce || data.type !== 'SEND') return;
     const requestId = data.payload?.requestId;
+    refreshCalibration();
+    if (!profile.directReady) {
+      emit('SEND_RESULT', { requestId, ok: false, fallback: true, reason: 'Direct mode is not calibrated' });
+      return;
+    }
+    // Ack before I/O. The isolated script may fall back only when this ack never
+    // arrives; otherwise a slow direct request could be duplicated by the composer.
+    emit('SEND_ACCEPTED', { requestId });
     directSend(data.payload?.text || 'turn')
-      .then(payload => emit('SEND_RESULT', { requestId, ok: true, ...payload }))
-      .catch(error => emit('SEND_RESULT', { requestId, ok: false, fallback: true, reason: String(error.message || error) }));
+      .then(payload => {
+        profile.lastResult = { ok: true, ...payload };
+        emit('SEND_RESULT', { requestId, ok: true, ...payload });
+      })
+      .catch(error => {
+        profile.lastResult = { ok: false, reason: String(error.message || error) };
+        emit('SEND_RESULT', { requestId, ok: false, fallback: false, reason: profile.lastResult.reason });
+      });
   });
 })();
