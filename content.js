@@ -3,9 +3,14 @@
 
   const BUTTON_ID = 'prompt-spur-button';
   const ACTIONS_ID = 'chatgpt-local-actions';
+  const CHANNEL = 'prompt-spur-bridge-v1';
   const DEFAULT_MESSAGE = 'turn';
   let message = DEFAULT_MESSAGE;
   let syncTimer = 0;
+  let mountAttempts = 0;
+  let bridgeNonce = crypto.randomUUID();
+  let bridgeRequestId = 0;
+  const bridgeRequests = new Map();
 
   chrome.storage.local.get({ message: DEFAULT_MESSAGE }, (stored) => {
     if (typeof stored.message === 'string' && stored.message.trim()) message = stored.message;
@@ -21,6 +26,18 @@
   // Mount immediately with the safe default. Storage only changes the label later,
   // so it cannot make this button arrive seconds after its neighboring controls.
   scheduleSync();
+
+  window.addEventListener('message', event => {
+    if (event.source !== window || event.origin !== location.origin) return;
+    const data = event.data;
+    if (!data || data.channel !== CHANNEL || data.nonce !== bridgeNonce) return;
+    if (data.type !== 'SEND_RESULT') return;
+    const pending = bridgeRequests.get(data.payload?.requestId);
+    if (!pending) return;
+    bridgeRequests.delete(data.payload.requestId);
+    pending.resolve(data.payload);
+  });
+  window.postMessage({ channel: CHANNEL, nonce: bridgeNonce, type: 'HELLO' }, location.origin);
 
   function isVisible(element) {
     if (!element) return false;
@@ -72,15 +89,52 @@
     target.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text }));
   }
 
-  function sendMessage() {
+  function bridgeSend(text) {
+    const requestId = ++bridgeRequestId;
+    return new Promise(resolve => {
+      const timeout = setTimeout(() => {
+        bridgeRequests.delete(requestId);
+        resolve({ ok: false, fallback: true, reason: 'Bridge unavailable' });
+      }, 350);
+      bridgeRequests.set(requestId, {
+        resolve: result => { clearTimeout(timeout); resolve(result); }
+      });
+      window.postMessage({ channel: CHANNEL, nonce: bridgeNonce, type: 'SEND', payload: { requestId, text } }, location.origin);
+    });
+  }
+
+  function sendViaComposer() {
     const target = editor();
     const form = target?.closest('form');
     if (!target || !form || !isEmpty(target)) return;
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     insertText(target, message);
-    requestAnimationFrame(() => setTimeout(() => {
+    const trySend = attempts => {
       const send = sendButton(form);
-      if (send && !send.disabled) send.click();
-    }, 80));
+      if (send && !send.disabled) {
+        send.click();
+        if (previousFocus && previousFocus.isConnected) setTimeout(() => previousFocus.focus({ preventScroll: true }), 0);
+      } else if (attempts > 0) {
+        requestAnimationFrame(() => trySend(attempts - 1));
+      }
+    };
+    requestAnimationFrame(() => trySend(3));
+  }
+
+  async function sendMessage() {
+    const button = document.getElementById(BUTTON_ID);
+    if (!button || button.dataset.busy === '1') return;
+    button.dataset.busy = '1';
+    button.disabled = true;
+    button.style.opacity = '.7';
+    try {
+      const result = await bridgeSend(message);
+      if (!result.ok || result.fallback) sendViaComposer();
+    } finally {
+      button.dataset.busy = '0';
+      button.disabled = false;
+      button.style.opacity = '1';
+    }
   }
 
   function bootMarkup() {
@@ -117,7 +171,11 @@
     syncTimer = 0;
     const target = editor();
     const form = target?.closest('form');
-    if (!target || !form) return;
+    if (!target || !form) {
+      if (mountAttempts++ < 30) setTimeout(sync, 500);
+      return;
+    }
+    mountAttempts = 0;
     const button = document.getElementById(BUTTON_ID) || createButton();
     const actions = actionContainer(form);
     if (!actions) return;
